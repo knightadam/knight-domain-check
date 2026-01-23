@@ -1,135 +1,69 @@
 name: 自动部署到 CF Worker
 
 on:
-    push:
-        branches:
-            - main
-        paths:
-            - "src/**"
-            - "frontend/**"
-            - "wrangler.toml"
-    workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'frontend/**'
+      - 'wrangler.toml'
+  workflow_dispatch:
 
 jobs:
-    auto-deploy:
-        runs-on: ubuntu-latest
-        env:
-            PASSWORD: ${{ secrets.PASSWORD }}
-            TGID: ${{ secrets.TGID}}
-            TGTOKEN: ${{ secrets.TGTOKEN}}
-            CF_KV_ID: ${{ secrets.CF_KV_ID }}
-            CF_CRONS: ${{ vars.CF_CRONS || '0 1,13 * * *' }}
+  auto-deploy:
+    runs-on: ubuntu-latest
+    env:
+      PASSWORD: ${{ secrets.PASSWORD }}
+      TGID: ${{ secrets.TGID}}
+      TGTOKEN: ${{ secrets.TGTOKEN}}
+      CF_KV_ID: ${{ secrets.CF_KV_ID }}
+      CF_CRONS: ${{ vars.CF_CRONS || '0 1,13 * * *' }}
 
-        steps:
-            - name: ⬇️ 检出仓库
-              uses: actions/checkout@v4
+    steps:
+      - name: ⬇️ 检出仓库
+        uses: actions/checkout@v4
 
-            - name: 🛠️ 安装 Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20"
+      - name: 🛠️ 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-            - name: 🆙 更新并安装最新 Wrangler
-              run: npm install -g wrangler@latest
+      - name: 🆙 更新并安装最新 Wrangler
+        run: npm install -g wrangler@latest
 
-            - name: 🔄 替换 wrangler.toml 中的变量
-              id: config_setup
-              run: |
-                  # 显示当前目录和文件列表，用于调试
-                  echo "📁 当前目录: $(pwd)"
-                  echo "📋 文件列表:"
-                  ls -la
+      - name: 🔄 替换 wrangler.toml 中的变量
+        id: config_setup
+        run: |
+          [ -n "${CF_KV_ID}" ] || { echo "🔴 错误: 必须设置 'CF_KV_ID' 变量"; exit 1; }  
+          sed -i "s#{CF_KV_ID}#${CF_KV_ID}#g" wrangler.toml
+          sed -i "s#{CF_CRONS}#${CF_CRONS}#g" wrangler.toml
 
-                  # 验证环境变量是否存在
-                  echo "🔍 环境变量检查:"
-                  echo "CF_KV_ID: ${CF_KV_ID:-未设置}"
-                  echo "CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-未设置}"
-                  echo "CF_CRONS: ${CF_CRONS:-未设置}"
+          WORKER_NAME=$(grep '^name =' wrangler.toml | awk -F '"' '{print $2}')
+          [ -n "$WORKER_NAME" ] || { echo "🔴 错误: 未能在 wrangler.toml 中找到 'name' 字段"; exit 1; }
 
-                  # 检查 CF_KV_ID 是否设置
-                  [ -n "${CF_KV_ID}" ] || { echo "🔴 错误: 必须设置 'CF_KV_ID' 变量"; exit 1; }  
+          echo -e "\n🎉 项目配置信息如下:"
+          echo "-------------------"
+          cat wrangler.toml
+          echo "-------------------"
+          echo "worker_name=$WORKER_NAME" >> $GITHUB_OUTPUT
 
-                  # 备份原始配置文件
-                  cp wrangler.toml wrangler.toml.bak
-
-                  # 替换变量，使用更可靠的替换命令
-                  echo "🔄 替换 wrangler.toml 中的变量..."
-                  sed -i "s/{CF_KV_ID}/${CF_KV_ID}/g" wrangler.toml
-                  sed -i "s/{CF_CRONS}/${CF_CRONS}/g" wrangler.toml
-
-                  # 验证替换结果
-                  echo "✅ 替换完成，验证结果:"
-                  echo "-------------------"
-                  cat wrangler.toml
-                  echo "-------------------"
-
-                  # 检查替换是否成功
-                  if grep -q "{CF_KV_ID}" wrangler.toml; then
-                    echo "🔴 错误: CF_KV_ID 替换失败，仍存在占位符"
-                    exit 1
-                  fi
-
-                  if grep -q "{CF_CRONS}" wrangler.toml; then
-                    echo "🔴 错误: CF_CRONS 替换失败，仍存在占位符"
-                    exit 1
-                  fi
-
-                  # 提取 Worker 名称
-                  WORKER_NAME=$(grep '^name =' wrangler.toml | awk -F '"' '{print $2}')
-                  [ -n "$WORKER_NAME" ] || { echo "🔴 错误: 未能在 wrangler.toml 中找到 'name' 字段"; exit 1; }
-
-                  echo "worker_name=$WORKER_NAME" >> $GITHUB_OUTPUT
-
-            - name: ⚙️ 动态配置 Worker 环境变量
+      - name: ⚙️ 动态配置 Worker 环境变量
         id: dynamic_vars
         run: |
           VARS=""
           [ -n "$PASSWORD" ] && VARS+="PASSWORD"$'\n' || echo "⚠️ 警告: PASSWORD 变量未设置，默认为 123123"
           [ -n "$TGID" ] && [ -n "$TGTOKEN" ] && VARS+="TGID"$'\n'"TGTOKEN"$'\n' || echo "⚠️ 警告: TG 变量未设置，无法执行 TG 通知"
-          
-          # 只输出一次变量列表到 GITHUB_OUTPUT
           printf 'vars_list<<EOF\n%sEOF\n' "$VARS" >>"$GITHUB_OUTPUT"
 
           if [ -n "$VARS" ]; then
+            printf 'vars_list<<EOF\n%sEOF\n' "$VARS" >>"$GITHUB_OUTPUT"
             echo -e "\n✅ 传递给 Wrangler 的环境变量名:"
             printf '%s' "$VARS"
           else
             echo -e "\n⚠️ 没有需要传递的变量名"
+            printf 'vars_list=\n' >>"$GITHUB_OUTPUT"
           fi
-
-      - name: 🧪 部署前配置验证
-        id: pre_deploy_check
-        run: |
-          echo "🔍 执行部署前配置验证..."
-          
-          # 检查 wrangler.toml 文件是否存在
-          if [ ! -f "wrangler.toml" ]; then
-            echo "🔴 错误: wrangler.toml 文件不存在"
-            exit 1
-          fi
-          
-          # 检查是否还有未替换的占位符
-          if grep -q "{.*}" wrangler.toml; then
-            echo "🔴 错误: wrangler.toml 中仍存在未替换的占位符:"
-            grep -n "{.*}" wrangler.toml
-            exit 1
-          fi
-          
-          # 检查 KV 命名空间配置
-          if ! grep -q "kv_namespaces" wrangler.toml; then
-            echo "🔴 错误: wrangler.toml 中未配置 kv_namespaces"
-            exit 1
-          fi
-          
-          # 检查 KV 命名空间 ID 是否有效（非空）
-          KV_ID=$(grep -A 2 "kv_namespaces" wrangler.toml | grep "id =" | awk -F '"' '{print $2}')
-          if [ -z "$KV_ID" ]; then
-            echo "🔴 错误: KV 命名空间 ID 为空"
-            exit 1
-          fi
-          
-          echo "✅ 部署前配置验证通过"
-          echo "kv_id=$KV_ID" >> $GITHUB_OUTPUT
 
       - name: 🚀 部署到 CF Worker
         uses: cloudflare/wrangler-action@v3
@@ -137,8 +71,6 @@ jobs:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ vars.CF_ACCOUNT_ID }}
           vars: ${{ steps.dynamic_vars.outputs.vars_list }}
-          # 确保使用正确的 wrangler.toml 文件
-          workingDirectory: .
 
       - name: ✨ 输出 Worker 管理后台
         env:
