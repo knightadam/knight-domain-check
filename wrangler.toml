@@ -1,20 +1,11 @@
-# 域名到期监控 Worker 配置
-# 更多配置选项: https://developers.cloudflare.com/workers/wrangler/configuration/
-
 name = "domain-check"
 main = "src/index.js"
 compatibility_date = "2025-11-17"
 keep_vars = true
 
-# KV 命名空间配置
-# 用于存储域名监控列表
 [[kv_namespaces]]
-binding = "DOMAIN_KV" # Worker 代码中使用的变量名
-id = "{CF_KV_ID}" # GitHub Actions 部署时会自动替换为实际的 KV 命名空间 ID
-# 注意: 请确保在 GitHub Secrets 中设置了 CF_KV_ID
+binding = "DOMAIN_KV" 
+id = "{CF_KV_ID}" # action部署时被变量替换
 
-# 定时任务配置
 [triggers]
-# GitHub Actions 部署时会自动替换为实际的 cron 表达式
-# 默认为北京时间 9:00 和 21:00 (UTC 时间 1:00 和 13:00)
-crons = ["{CF_CRONS}"]
+crons = ["{CF_CRONS}"] # action部署时被变量替换，默认为北京时间 9:00 和 21:00
